@@ -1,0 +1,13 @@
+# Build artifacts
+build/
+*.exe
+*.pdb
+*.lib
+*.dll
+*.obj
+*.exp
+*.so
+*.dylib
+
+# Editor / tooling
+ols.json
