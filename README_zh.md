@@ -3,7 +3,8 @@
 纯 Odin 编写的 **SkelForm** 2D 骨骼动画运行时，附带一个 raylib 示例，可加载并播放导出的 `.skf`
 骨骼资源。
 
-对应 **SkelForm 0.8.0** —— 见[版本对应](#版本对应)。
+对应 **SkelForm 0.8.0** —— 见[版本对应](#版本对应)。完整的函数与类型参考在
+**[docs/api.md](docs/api.md)**（英文）。
 
 [English](README.md) · **中文**
 
@@ -14,11 +15,6 @@
 仓库根目录**就是**库本身（`package skelform`），示例放在它旁边。以 `skf` 导入后，在你自己的渲染
 循环里调用即可。
 
-运行时逐行移植自 Rust 的通用运行时
-[`rusty_skelform`](https://github.com/Retropaint/rusty_skelform) v0.8.0，并以 Go 运行时
-[`skelform_go`](https://github.com/Retropaint/skelform_go) 作为行为校准。类型、字段顺序、求值顺序
-完全一致，因此 `skelform.odin` 可以直接和 Rust 的 `src/lib.rs` 对照 diff。
-
 | 路径 | 内容 |
 | --- | --- |
 | `skelform.odin` | 数据模型 + 运行时：动画采样、父子继承、反向动力学（IK）、物理、网格形变 |
@@ -26,29 +22,22 @@
 | `example/main.odin` | raylib 演示：窗口、输入、动画循环 |
 | `example/render.odin` | raylib 适配层：屏幕空间构建与贴图绘制 |
 | `example/*.skf` | 演示骨骼资源（`skellington`、`skellina`） |
+| `docs/api.md` | API 参考：类型、函数、所有权约定、raylib 适配层契约（英文） |
 | `docs/` | 本说明文档使用的运行截图 |
 
 ## 版本对应
 
-| 组件 | 本移植对应的版本 |
-| --- | --- |
-| SkelForm 编辑器（`.skf` 的导出方） | **0.8.0** |
-| `rusty_skelform`（本移植所依据的运行时） | **0.8.0** |
-| `rusty_skelform_macroquad`（`example/render.odin` 对照的适配层） | **0.8.0** |
-| `skelform_go`（行为交叉核对） | 最新 |
+本运行时面向 **SkelForm 0.8.0** 的导出结果。
 
-`.skf` 自带格式版本：`armature.json` 中的 `version` 字符串，编辑器写入的是它自己的
-`CARGO_PKG_VERSION`。**`rusty_skelform` 与本移植都不读取该字段**：解析过程与版本无关。
-`example/` 中附带的两个骨骼资源由 SkelForm **0.7.0** 导出，可正常加载。
+`.skf` 自带格式版本：`armature.json` 中的 `version` 字符串，编辑器在那里写入它自己的版本号。
+**本运行时不读取该字段**：解析过程与版本无关，因此来自更新版编辑器的文件会丢弃无法识别的键并正常
+加载，而不会失败。`example/` 中附带的两个骨骼资源是 **0.7.0** 导出，可正常加载。
 
-实际含义：
-
-* `loader.odin` 手写映射 `armature.json`，缺失的键套用与 serde 一致的默认值，因此含有*额外*键的
-  文件（来自更新的编辑器）会丢弃那些键并正常加载，而不会失败。它不会因为版本不符而拒绝文件 ——
-  需要严格校验时请自行检查 `version`。
-* **0.6** 之前的导出**不支持**。这类文件由编辑器在打开时自行升级（`src/backwards_compat.rs` 覆盖
-  0.2 → 0.5），运行时只会见到当前版本的 JSON。旧文件请先在编辑器里重新导出，不要直接喂给运行时。
-* 已对照编辑器源码 `68b66d2`（`Cargo.toml` 版本 `0.8.0`）验证。
+* **0.6** 之前的导出不支持。这类文件由编辑器在打开时自行升级（`src/backwards_compat.rs` 覆盖
+  0.2 → 0.5），所以运行时只会见到当前版本的 JSON。旧文件请先在编辑器里重新导出，不要直接喂给
+  运行时。
+* 需要严格校验？自己读取 `armature.json` 里的 `version` 即可 —— `skf_find_entry` 可以把这个条目
+  取出来。
 
 ## 环境要求
 
@@ -170,57 +159,19 @@ skelform: ok, drew 30 frames, 61 constructed bones
 
 如果加载成功但什么都没画出来，会报 `0 / 630000 ... (0.0%)`，所以「计数非零」就是通过条件。
 
-## API 概览
+## API 参考
 
-类型与 Rust 运行时一一对应：`Vec2`、`Tint`、`Vertex`、`BoneBindVert`、`BoneBind`、`Keyframe`、
-`Animation`、`InverseKinematics`、`Visuals`、`Physics`、`Bone`、`Style`、`Texture`、`TexAtlas`、
-`Armature`，以及 `HandlePreset` / `AnimElement` / `JointConstraint` / `InverseKinematicsMode`
-枚举。
+所有类型的字段、所有函数的签名、运行时认识的 `Keyframe.element` 字符串、所有权表，以及 raylib
+适配层契约，都在 **[docs/api.md](docs/api.md)**（英文）。需要记住的四件事：
 
-运行时：
-
-| 过程 | 用途 |
-| --- | --- |
-| `animate` | 把动画采样进 `bones` / `visuals` / `inverse_kinematics`，并让未被采样的元素缓动回初始值 |
-| `construct` | 依次执行 `reset_inheritance` → `inheritance` → IK → 物理 → `construct_verts` → `propagate_hidden` |
-| `inverse_kinematics` | FABRIK 与圆弧解算器；返回逐骨骼旋转（返回的 map 由调用方释放） |
-| `inheritance`、`reset_inheritance` | 子对父的变换继承 |
-| `construct_verts`、`inherit_vert` | 基于骨骼绑定的网格形变（权重绑定与路径绑定） |
-| `format_frame`、`time_frame` | 循环/往返、由秒数求帧号等辅助函数 |
-| `get_bone_texture`、`active_styles` | style / 贴图查找 |
-| `rotate_vec2`、`shortest_angle_delta`、`is_facing_left`、`vec2_magnitude`、`vec2_normalize` 等 | 数学辅助函数 |
-| `armature_destroy` | 释放一个 armature 里的所有动态数组 |
-
-加载：
-
-| 过程 | 用途 |
-| --- | --- |
-| `skf_load(path)`、`skf_load_from_memory(data)` | 把 `.skf` 归档解析成 `SKF { armature, atlases }` |
-| `skf_destroy(skf)` | 释放 armature、图集字节以及承载字符串的存储 |
-| `armature_parse_json(data)` | 只解析 `armature.json`（返回持有字符串的 `json.Value`） |
-| `skf_find_entry(data, name)` | 从内存中的归档里复制出单个条目 |
-
-### 命名约定
-
-过程名保留 Rust 的 `snake_case`、类型名保留 `PascalCase`，而没有采用 Odin「一律 PascalCase」的
-惯例，这样每个名字都能与 `rusty_skelform` 一一对应，移植 diff 也保持可读。Rust 中私有的 `fn`
-在这里写作 `@(private = "package")`；公开接口上唯一的增补是 `vec2_*` 系列（Rust 用运算符表达）
-以及 `skelform.odin` 中 "Lookup helpers" 一节里的查找函数。
-
-## 所有权与内存
-
-`Armature` 的字符串是**借用**的（骨骼 / 贴图 / style 名、关键帧的 `element` 与 `value_str`、IK 的
-约束与模式），它只拥有自己的动态数组：
-
-* `armature_destroy` 只释放数组，因此对手工构造、使用字符串字面量的 armature 也是安全的。
-* `skf_destroy` 释放 `SKF` 拥有的一切，包括支撑那些字符串的 JSON 解析树、图集 PNG 字节以及
-  armature 的数组。只要还在用它的 armature 绘制，就必须让 `SKF` 保持存活。
-
-运行时过程确实会分配内存。每次调用中，`animate` 构造一个元素重置 map，`propagate_hidden` 构造一个
-隐藏标记缓冲，`inverse_kinematics` 为每个 IK 家族构造一个索引数组，外加它返回的 `map[u32]f32`
-（调用方必须 `delete`）。`construct` 本身只增长由 armature 持有的 `constructed_bones`，第一帧之后
-就不再增长。这些都来自环境的 `context.allocator`，所以在帧周围给 context 装一个 `mem.Scope`
-分配器，就能把这些流量挡在堆之外。
+1. 每帧的顺序是 `animate` → `construct` → 绘制 `constructed_bones` 与 `visuals`。不要绘制
+   `armature.bones`。
+2. 引用型 id 是 `i32`，`-1` 表示「无」；`Bone.id` 从 0 起连续编号，并且可以直接当作它在 `bones`
+   中的下标。
+3. `active_styles` 与 `inverse_kinematics` 返回新分配的值，调用方必须 `delete()`。
+4. `Armature` 的字符串是从产生它的 `SKF`**借用**的 —— 只要还在用它的 armature 绘制，就必须让
+   `SKF` 保持存活。`armature_destroy` 只释放数组，这也是手工构造的 armature 同样能被安全释放的
+   原因。
 
 ## `.skf` 格式
 
@@ -233,45 +184,12 @@ editor.json, thumbnail.png, readme.md   编辑器专用的额外文件（忽略�
 ```
 
 `loader.odin` 自己实现了 ZIP 中央目录读取（stored 与 deflate 条目，通过 `core:compress/zlib`
-处理），并手写 JSON 映射，因此 serde 的兼容默认值被精确复现：缺失的 tint 为 `(1, 1, 1, 1)`，缺失的
-标量为 `0`，缺失的向量为 `(0, 0)`，`Keyframe.handle_preset` 默认为 `.Linear`，以此类推。较早的
+处理），并手写 JSON 映射，因此缺失的键会回退到导出器预期的默认值：缺失的 tint 为 `(1, 1, 1, 1)`，
+缺失的标量为 `0`，缺失的向量为 `(0, 0)`，`Keyframe.handle_preset` 为 `.Linear`，以此类推。较早的
 编辑器版本把 IK 家族 id 写成 `"id"`；`"id"` 与 `"family_id"` 都会被接受。
 
 需要注意 `Style.active` **不在** `armature.json` 里 —— 编辑器把它存在 `editor.json`。因此导出的
 `.skf` 中没有任何 style 被标记为在用，`active_styles` 会退回到名为 `"Default"` 的 style，若也没有
 则取最后一个。
-
-## 移植说明（以 `skelform_go` 校准）
-
-| 位置 | `rusty_skelform` 0.8.0 | `skelform_go` | 本移植 |
-| --- | --- | --- | --- |
-| 物理缩放阻尼 | 判断 `pos_ratio`（复制粘贴 bug） | 判断 `scale_ratio` | `scale_ratio` |
-| `animate` 的元素跟踪 | 即使关键帧已超过当前帧也会登记（登记发生在提前 `break` 之前） | 只登记真正被应用的帧 | 采用 Go 行为 |
-| 贴图重置 | 应用时判断 `"Tex"`，重置时却判断 `"Texture"`，导致动画贴图总被重置回去 | 未实现 | 每个元素一个标记，`"Tex"` 被正确跟踪 |
-| `point_bones` 的末端骨骼 | 跳过末端骨骼，保留其原始旋转 | 把末端旋转设为 `atan2(0, 0) = 0` | 采用 Rust 行为 |
-| `inheritance` 镜像 | 父骨骼朝左时对子骨骼取反 | 未实现 | 采用 Rust 行为 |
-| Visuals/IK 动画、`propagate_hidden`、`baked_ik` | 存在（0.8.0 特性） | 不存在 | 采用 Rust 行为 |
-| 越界访问 | panic（`unwrap` / 索引） | 查找失败时返回 `bones[0]` | 跳过，并标注 `NOTE(panic-safety)` |
-
-对畸形输入的处理是唯一有意为之的行为差异。Rust 代码会在越界的 `unwrap()` 或索引处 panic，本运行时
-则跳过出问题的元素，这些位置都标了 `NOTE(panic-safety):`。无论是否加保护，越界索引都会干净地 trap
-—— 除非构建时使用了 `-no-bounds-check`，那会把它们变成静默的越界访问，所以在这样的构建里发布
-之前请先校验 `.skf` 文件。
-
-剩下的差异属于表达习惯而非行为：Rust 的浮点转整数用 `f32_as_u32` 复现，使 `NaN` / 负值饱和到 `0`
-而不是未定义，与 Rust 的 `as` 运算符一致。
-
-## 出处
-
-* 运行时逻辑、数据模型与示例资源移植自
-  [`rusty_skelform`](https://github.com/Retropaint/rusty_skelform) /
-  [`rusty_skelform_macroquad`](https://github.com/Retropaint/rusty_skelform_macroquad)
-  （MIT，© Retropaint）。`example/` 下的 `.skf` 来自 macroquad 运行时的 `examples/` 目录。
-* 行为已与 [`skelform_go`](https://github.com/Retropaint/skelform_go) 交叉核对，`.skf` 的导出
-  语义则对照 [SkelForm 编辑器](https://github.com/Retropaint/SkelForm) 本身确认。
-* raylib 集成沿用 `rusty_skelform_macroquad` 的引擎适配层，但有三处改动是 Y-up → Y-down 的坐标
-  映射强制要求的：关闭背面剔除（该映射会反转三角形绕序）、骨骼的 pivot 偏移在绕骨骼旋转**之前**
-  先对 Y 取反、贴图四边形与网格走同一个三角形发射路径（因为在 X 缩放为负时 `DrawTexturePro` 不再
-  是干净的镜像）。
 
 MIT 许可 —— 见 [LICENSE](LICENSE)。
