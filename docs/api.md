@@ -36,7 +36,7 @@ skf.construct(armature)
 ```
 
 `animate` writes the *authored* bones; `construct` derives `constructed_bones` and deforms the
-meshes. Never draw `armature.bones` — draw `armature.constructed_bones`.
+meshes. Never draw `armature.bones`; draw `armature.constructed_bones`.
 
 ---
 
@@ -59,8 +59,8 @@ InverseKinematicsMode :: enum i32 { FABRIK, Arc }
 AnimElement :: enum i32 { PositionX, PositionY, Rotation, ScaleX, ScaleY, Zindex, Texture, IkConstraint }
 ```
 
-`AnimElement` is documentation only and is **not** the authoritative list — the runtime compares
-`Keyframe.element` as a string. The strings it actually recognises:
+`AnimElement` is documentation only and is **not** the authoritative list, because the runtime
+compares `Keyframe.element` as a string. The strings it actually recognises:
 
 | `Keyframe.element` | Drives |
 | --- | --- |
@@ -264,7 +264,7 @@ is empty.
 
 `smooth_frames[a]` is the interpolation smoothing window used while applying animation `a`'s
 keyframes. Elements the playing animations do **not** touch are eased back to their `init_*` value
-using `smooth_frames[0]` and `frames[0]` — the reset pass is indexed at `[0]` only, so keep the
+using `smooth_frames[0]` and `frames[0]`. The reset pass is indexed at `[0]` only, so keep the
 slice at least as long as the animation count and give `[0]` the easing you want for resets.
 `20` is what the example uses.
 
@@ -305,9 +305,9 @@ get_bone_texture  :: proc(bone_tex: string, styles: []Style)      -> (Texture, b
 `find_bone`, `get_visuals`, `get_physics` treat a negative id as "not found" and return `false`
 out of range; the returned pointer aliases the input slice, so it invalidates on any append.
 
-`active_styles` allocates a new slice — `delete()` it — and returns the styles a renderer may be
-given. It prefers every style flagged `active`; because game exports never carry that flag it falls
-back to the style named `"Default"` (case-insensitive), else the last style, else `nil`.
+`active_styles` allocates a new slice (the caller must `delete()` it) and returns the styles a
+renderer may be given. It prefers every style flagged `active`; because game exports never carry that
+flag it falls back to the style named `"Default"` (case-insensitive), else the last style, else `nil`.
 
 `get_bone_texture` walks the given styles in order and returns the **first** exact-name match.
 Pass only `active_styles` (or the one costume the player chose); a returned `Texture.size` of
@@ -365,7 +365,7 @@ inherit_vert       :: proc(pos: Vec2, bone: ^Bone, visuals: ^Visuals) -> Vec2
 | Owner | Freed by |
 | --- | --- |
 | `SKF.armature` arrays | `armature_destroy` / `skf_destroy` |
-| Strings inside the armature | the `json.Value` inside `SKF` — freed by `skf_destroy` |
+| Strings inside the armature | the `json.Value` inside `SKF`, freed by `skf_destroy` |
 | `SKF.atlases` PNG buffers | `skf_destroy` |
 | `active_styles` result slice | caller, `delete()` |
 | `inverse_kinematics` result map | caller, `delete()` |
@@ -379,11 +379,13 @@ that uses string literals. `skf_destroy` is the one that also drops the JSON tre
 ## raylib adapter (`example/render.odin`)
 
 `example/` is `package main`, so this is a file to copy into a project, not an importable package.
-Public surface:
+It owns everything raylib-specific; `main.odin` owns the demo loop. Public surface:
 
 ```odin
-Construct_Options :: struct { position, scale, velocity: skf.Vec2 }
-DEFAULT_CONSTRUCT_OPTIONS   :: Construct_Options          // all zero
+Construct_Options :: struct {
+	position, scale, velocity: skf.Vec2,   // screen pixels, multiplier, fake momentum
+}
+DEFAULT_CONSTRUCT_OPTIONS :: Construct_Options   // scale {1, 1}, the rest {0, 0}
 
 construct_with_options :: proc(armature: ^skf.Armature, options: Construct_Options = DEFAULT_CONSTRUCT_OPTIONS)
 draw_armature          :: proc(armature: ^skf.Armature, textures: []rl.Texture2D, styles: []skf.Style)
@@ -391,28 +393,55 @@ draw_bones             :: proc(armature: ^skf.Armature)   // debug overlay, call
 
 load_textures   :: proc(archive: ^skf.SKF)             -> [dynamic]rl.Texture2D
 unload_textures :: proc(textures: ^[dynamic]rl.Texture2D)
+
+BONE_COLOR        :: rl.Color{80, 140, 230, 210}
+BONE_HIDDEN_COLOR :: rl.Color{220, 90, 90, 120}
 ```
 
-`construct_with_options` runs `skf.construct` and then maps the result into raylib's Y-down screen
-space: negate `pos.y` and `rot`, multiply by `options.scale`, add `options.position`, and subtract
-`options.velocity` from physics positions to fake momentum. Pass a negative `scale.x` to flip facing.
+`construct_with_options` calls `skf.construct` and then rewrites the result in place for screen
+space. Per constructed bone: negate `pos.y` and `rot`, multiply `scale` and `pos` by `options.scale`,
+add `options.position`, and subtract `options.velocity` from the bone's physics `global_pos`. If
+`skf.is_facing_left(options.scale)` it negates `rot` a second time, which puts it back to its
+original sign. Every `Visuals.vertices[i].pos` of a bone with a mesh
+gets the same negate, scale and translate treatment, so the mesh data is only valid for the frame it
+was built in.
 
-Three things the adapter does differently from a naive port, all forced by the Y-up → Y-down
+`draw_armature` then does, in order:
+
+1. `rlgl.DisableBackfaceCulling()`, left off for the rest of the frame.
+2. A stable sort of `constructed_bones` by `Visuals.zindex` **ascending**, through a temporary
+   `(zindex, index)` array so the caller's bone order is never mutated. Equal z-index keeps the
+   original order, so low z is painted first and high z ends up on top.
+3. Per bone, in that order: skip it when `bone.hidden`, when `visuals_id == -1`, when the visual or
+   the style lookup misses, or when `Texture.atlas_idx` is outside `textures`. Otherwise the bone is
+   drawn as a mesh when `len(visual.vertices) > 0`, and as a sprite quad otherwise.
+
+The vertex colour is `visual.tint` clamped to `0..1` and scaled to `u8`. `Visuals.pivot_rot` applies
+to sprite bones only (`bone.rot + pivot_rot * dir`, where `dir` is `1` facing left and `-1` facing
+right); `draw_mesh` ignores it.
+
+Three things the adapter does differently from a naive port, all forced by the Y-up to Y-down
 mapping. If you write your own renderer, these are the bugs to check for:
 
-1. **Backface culling must stay off** (`rlgl.DisableBackfaceCulling()`). The mapping reverses
-   triangle winding, so culling drops every mesh of an unmirrored armature and keeps only the
-   mirrored one. It matters at batch-flush time, so do not `defer` an enable.
-2. **Pivot offset order.** `Visuals.pivot_pos` is texture space (Y up), so negate Y *before*
-   rotating by the bone: `rotate(pivot * scale_with_negated_y, bone.rot)`. Rotating by
-   `bone.rot * dir` and negating afterwards only agrees for one facing direction and makes parts
-   with a pivot jump across the body on a flip.
-3. **Do not use `rl.DrawTexturePro`** for sprite bones. It derives rotated corners from
-   `dest.width`, and a flip makes `bone.scale.x` negative, which is not a clean mirror. Emit the
-   four-corner quad as triangles through the same path as meshes.
+1. **Backface culling must stay off.** The mapping reverses triangle winding, so culling drops every
+   mesh of an unmirrored armature and keeps only the mirrored one. It matters at batch-flush time, so
+   do not `defer` an enable.
+2. **Pivot offset order.** `Visuals.pivot_pos` is texture space (Y up), so negate Y *before* rotating
+   by the bone: `rotate((pivot_pos * tex.size * bone.scale) with y negated, bone.rot)`. Rotating by
+   `bone.rot * dir` and negating afterwards only agrees for one facing direction and makes parts with
+   a pivot jump across the body on a flip.
+3. **Do not use `rl.DrawTexturePro`** for sprite bones. It derives rotated corners from `dest.width`,
+   and a flip makes `bone.scale.x` negative, which is not a clean mirror. Emit the four-corner quad as
+   triangles through the same path as meshes.
 
-`rlgl.CheckRenderBatchLimit(n)` is required before emitting vertices — rlgl's vertex functions do
-not grow the render batch themselves and silently drop vertices once it is full.
+`rlgl.CheckRenderBatchLimit(n)` is required before emitting vertices, because rlgl's vertex functions
+do not grow the render batch themselves and silently drop vertices once it is full. The adapter calls
+it once per mesh (with the index count) and once per sprite quad (with 6).
+
+`load_textures` returns one texture per `archive.atlases` entry, in the same order, so the result can
+be passed to `draw_armature` as `textures` directly: a missing PNG becomes a zero `rl.Texture2D{}`
+placeholder rather than shifting every later index. `unload_textures` frees them and the dynamic
+array itself. Both must be called with a live raylib window.
 
 ---
 
@@ -422,8 +451,8 @@ not grow the render batch themselves and silently drop vertices once it is full.
 | --- | --- |
 | SkelForm editor (`.skf` exporter) | 0.8.0 |
 
-`.skf` files carry their own format version as the `version` string in `armature.json`. **No
-runtime in this family reads it** — parsing is version-agnostic. Exports from before 0.6 are not
+`.skf` files carry their own format version as the `version` string in `armature.json`. **No runtime
+in this family reads it**, so parsing is version-agnostic. Exports from before 0.6 are not
 supported: the editor upgrades those itself on open (`src/backwards_compat.rs`), so re-export old
 files from the editor rather than feeding them to a runtime. The armatures in `example/` are 0.7.0
 exports and load unchanged.

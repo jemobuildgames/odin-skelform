@@ -3,42 +3,12 @@
 A pure-Odin runtime for **SkelForm** 2D skeletal animation, plus a raylib example that loads and
 plays exported `.skf` armatures.
 
-Targets **SkelForm 0.8.0** — see [Version compatibility](#version-compatibility).
-The full procedure and type reference lives in **[docs/api.md](docs/api.md)**.
-
 **English** · [中文](README_zh.md)
 
-![The example running with example/skellington.skf](docs/example.png)
+![skellina running, with the bone overlay on](docs/bones_run.png)
 
-## Layout
-
-The repository root **is** the library (`package skelform`); the demo lives next to it. Import it
-as `skf` and call it from your own render loop.
-
-| Path | Contents |
-| --- | --- |
-| `skelform.odin` | Data model + runtime: animation sampling, inheritance, inverse kinematics, physics, mesh deformation |
-| `loader.odin` | `.skf` loading: a small ZIP reader (stored + deflate) and `armature.json` mapping |
-| `example/main.odin` | raylib demo: window, input, animation loop |
-| `example/render.odin` | raylib glue: screen-space construction and textured drawing |
-| `example/*.skf` | Demo armatures (`skellington`, `skellina`) |
-| `docs/api.md` | API reference: types, procedures, ownership, the raylib adapter contract |
-| `docs/` | Screenshots used by this README |
-
-## Version compatibility
-
-This targets **SkelForm 0.8.0** exports.
-
-A `.skf` carries its own format version as the `version` string in `armature.json`, where the
-editor writes its own package version. **This runtime does not read that field**: parsing is
-version-agnostic, so a file from a newer editor loads with unrecognised keys dropped rather than
-failing. The two armatures shipped in `example/` are **0.7.0** exports and load unchanged.
-
-* Exports from before **0.6** are not handled. The editor upgrades those itself when opening
-  (`src/backwards_compat.rs` covers 0.2 → 0.5), so runtimes only ever see current-version JSON.
-  Re-export old files from the editor instead of feeding them to a runtime.
-* Need strict checking? Read `version` out of `armature.json` yourself — `skf_find_entry` will hand
-  you the entry.
+The repository root **is** the library (`package skelform`), and the demo lives next to it. The full
+type and procedure reference is in **[docs/api.md](docs/api.md)**.
 
 ## Requirements
 
@@ -46,8 +16,9 @@ failing. The two armatures shipped in `example/` are **0.7.0** exports and load 
 * The runtime has no C dependency and no third-party Odin dependency: only `core:` packages
   (`core:encoding/json`, `core:compress/zlib`, `core:mem`, …).
 * The example additionally needs `vendor:raylib`, which ships with the Odin compiler.
+* SkelForm editor **0.8.0** exports, see [Version compatibility](#version-compatibility).
 
-## Using the runtime
+## How to use
 
 Four calls per frame. Everything below is what `example/main.odin` does.
 
@@ -84,9 +55,9 @@ skf.construct(armature)
 ```
 
 Step 4 is the only part the library deliberately does not provide. `example/render.odin` is the
-raylib version: it flips the armature into raylib's Y-down screen space and emits every bone —
-mesh or sprite quad — as rlgl triangles. Copy it into a project and adapt it, or call it directly
-(see [Running the example](#running-the-example)).
+raylib version: it flips the armature into raylib's Y-down screen space and emits every bone, mesh
+or sprite quad, as rlgl triangles. Copy it into a project and adapt it, or call it directly (see
+[Running the example](#running-the-example)).
 
 Two things to know before drawing:
 
@@ -95,7 +66,8 @@ Two things to know before drawing:
   textures yourself.
 * Textures are looked up per **style** (costume). Pass only the worn styles to the draw step; a
   style that has no entry for a texture, or only a 1×1 one, hides that part. `skf.active_styles`
-  returns the armature's own selection.
+  returns the armature's own selection, and it falls back to the style named `"Default"` (or the
+  last style) because `Style.active` is editor-only and never reaches `armature.json`.
 
 ## Running the example
 
@@ -104,7 +76,7 @@ odin run example                        # windowed, uses example/skellington.skf
 odin run example -- example/skellina.skf
 ```
 
-Or build it once and run the exe — it also finds the armatures relative to its own directory, so
+Or build it once and run the exe. It finds the armatures relative to its own directory too, so
 `build/example.exe` works from anywhere:
 
 ```sh
@@ -112,33 +84,17 @@ odin build example -out:build/example.exe
 ./build/example.exe
 ```
 
-The window is 900×700 and the HUD lists the live controls.
-
-![The same demo with example/skellina.skf](docs/example_skellina.png)
-
-| Key | Action |
-| --- | --- |
-| `A` / `D` | Walk left / right. The facing direction follows the last horizontal key. |
-| `W` / `S` | Move up / down |
-| `SPACE` | Cycle to the next animation |
-| `1` … `9` | Wear that single costume (style) |
-| `0` | Go back to the armature's active costume set |
-| `B` | Toggle the bone overlay: a line per bone-to-parent link, a dot per joint, hidden bones in red |
-| `F12` | Write a screenshot — only when `-screenshot file.png` was also given |
-
-`B` toggles the bone overlay, the quickest way to see what `construct` actually produced — here on
-the `Stand` and `Run` animations:
-
-![Standing, with the bone overlay on](docs/bones_stand.png)
-
-![Running, with the bone overlay on](docs/bones_run.png)
+The window is 900×700 and the HUD lists the live controls. `A` / `D` / `W` / `S` move the armature
+and set its facing, `SPACE` cycles to the next animation, `1` … `9` wear that single costume, `0`
+goes back to the armature's active costume set, and `B` toggles the bone overlay shown in the
+screenshot above, which is the quickest way to see what `construct` actually produced.
 
 Every mode the keys reach is also startable from the command line:
 
 | Flag | Meaning |
 | --- | --- |
 | `<file>.skf` | Armature to load (positional, defaults to `example/skellington.skf`) |
-| `-frames N` | Quit after N frames — makes the example scriptable |
+| `-frames N` | Quit after N frames, which makes the example scriptable |
 | `-hidden` | Create the window hidden (no desktop flash); pair with `-frames` |
 | `-stats` | Read the last frame and print how many pixels differ from the clear colour |
 | `-static` | Freeze the animation on frame 0 |
@@ -147,12 +103,13 @@ Every mode the keys reach is also startable from the command line:
 | `-screenshot file.png` | Where `F12` writes; without it no capture happens at all |
 
 ```sh
-odin run example -- -frames 120 -hidden -stats          # headless smoke test
+odin run example -- -frames 30 -hidden -stats           # headless render check
 odin run example -- -static -bones                      # inspect the rig
 odin run example -- -left                               # check the mirrored facing
 ```
 
-`-stats` turns the example into a render check that needs no window:
+A run that loads but draws nothing reports `0 / 630000 … (0.0%)`, so a non-zero count is the pass
+condition:
 
 ```text
 skelform: loaded example/skellington.skf: 61 bones, 4 animations, 21 visuals, 5 IK families, 1 atlases, 4 styles
@@ -160,8 +117,18 @@ skelform: 59561 / 630000 pixels differ from the clear color (9.5%)
 skelform: ok, drew 30 frames, 61 constructed bones
 ```
 
-A run that loads but draws nothing reports `0 / 630000 ... (0.0%)`, so a non-zero count is the
-pass condition.
+## Version compatibility
+
+This targets **SkelForm 0.8.0** exports. A `.skf` carries its own format version as the `version`
+string in `armature.json`, where the editor writes its own package version. **This runtime does not
+read that field**: parsing is version-agnostic, so a file from a newer editor loads with
+unrecognised keys dropped rather than failing. The two armatures shipped in `example/` are **0.7.0**
+exports and load unchanged.
+
+Exports from before **0.6** are not handled. The editor upgrades those itself when opening
+(`src/backwards_compat.rs` covers 0.2 to 0.5), so runtimes only ever see current-version JSON.
+Re-export old files from the editor instead of feeding them to a runtime. Need strict checking? Read
+`version` out of `armature.json` yourself; `skf_find_entry` will hand you the entry.
 
 ## API reference
 
@@ -175,28 +142,8 @@ runtime recognises, the ownership table and the raylib adapter contract are in
    index into `bones`.
 3. `active_styles` and `inverse_kinematics` return freshly allocated values the caller must
    `delete()`.
-4. An `Armature` **borrows** its strings from the `SKF` that produced it — keep the `SKF` alive for
-   as long as you draw from its armature. `armature_destroy` frees arrays only, which is what makes
-   a hand-built armature safe to destroy too.
+4. An `Armature` **borrows** its strings from the `SKF` that produced it, so keep the `SKF` alive
+   for as long as you draw from its armature. `armature_destroy` frees arrays only, which is what
+   makes a hand-built armature safe to destroy too.
 
-## The `.skf` format
-
-A `.skf` file is a plain ZIP archive:
-
-```text
-armature.json   runtime data (mapped onto `Armature`)
-atlas0.png ...  one PNG per entry of `armature.atlases`
-editor.json, thumbnail.png, readme.md   editor-only extras (ignored)
-```
-
-`loader.odin` implements the ZIP central-directory reader itself (stored and deflate entries,
-handled through `core:compress/zlib`) and maps the JSON by hand, so absent keys fall back to the
-defaults the exporter expects: missing tints become `(1, 1, 1, 1)`, missing scalars `0`, missing
-vectors `(0, 0)`, `Keyframe.handle_preset` `.Linear`. Older editor versions wrote the IK family id
-as `"id"`; both `"id"` and `"family_id"` are accepted.
-
-Note that `Style.active` is *not* in `armature.json` — the editor keeps it in `editor.json`. An
-exported `.skf` therefore reports no style as active, and `active_styles` falls back to the style
-named `"Default"`, or to the last style.
-
-MIT licensed — see [LICENSE](LICENSE).
+MIT licensed, see [LICENSE](LICENSE).
